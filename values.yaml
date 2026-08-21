@@ -42,7 +42,8 @@ gitCredentials:
   # Name of an existing Secret populated by the 1Password Operator.
   # Defaults to <release fullname>-git when empty.
   secretName: ""
-  privateKeyKey: ssh
+  # 1Password SSH Key items expose "private key" as "private-key".
+  privateKeyKey: private-key
   knownHostsKey: known-hosts
   onePassword:
     # Create a OnePasswordItem which provisions the Secret used by this chart.

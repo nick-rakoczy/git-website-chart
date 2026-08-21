@@ -21,7 +21,7 @@ metadata:
   name: example-com-git
 type: Opaque
 stringData:
-  ssh: |-
+  private-key: |-
     -----BEGIN OPENSSH PRIVATE KEY-----
     ...
     -----END OPENSSH PRIVATE KEY-----
@@ -33,8 +33,10 @@ Store the real values in 1Password. Do not commit the private key. Obtain and
 verify GitHub's current host keys from GitHub's documentation rather than
 copying the placeholder above.
 
-Create two fields on the 1Password item named `ssh` and `known-hosts`. Enable
-provisioning directly from the chart with:
+Use a 1Password **SSH Key** item and add a custom text field named
+`known-hosts`. The operator normalizes the built-in `private key` field to the
+Secret key `private-key`; `known-hosts` keeps its name. Enable provisioning
+directly from the chart with:
 
 ```yaml
 gitCredentials:
@@ -48,6 +50,14 @@ gitCredentials:
 The operator creates a Secret with the same name as the generated
 `OnePasswordItem`. To use an existing Secret instead, leave
 `onePassword.enabled: false` and set `gitCredentials.secretName`.
+
+If an existing Secret uses different key names, override them explicitly:
+
+```yaml
+gitCredentials:
+  privateKeyKey: private-key
+  knownHostsKey: known-hosts
+```
 
 ## Install or render
 
