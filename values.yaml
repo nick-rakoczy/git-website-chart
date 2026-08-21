@@ -1,0 +1,90 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: nginx
+  tag: alpine
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+site:
+  repository: ""
+  revision: main
+  indexFile: index.html
+
+gitSync:
+  image:
+    repository: registry.k8s.io/git-sync/git-sync
+    tag: v4.7.0
+    pullPolicy: IfNotPresent
+  period: 30s
+  depth: 1
+  maxFailures: -1
+  root: /git
+  link: current
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+gitCredentials:
+  # Name of an existing Secret populated by the 1Password Operator.
+  secretName: ""
+  privateKeyKey: ssh
+  knownHostsKey: known-hosts
+
+nginx:
+  port: 8080
+  cacheControl: "public, max-age=300"
+  extraConfig: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+podSecurityContext:
+  fsGroup: 101
+  fsGroupChangePolicy: OnRootMismatch
+
+automountServiceAccountToken: false
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+  hostname: ""
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: ""
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "static-site.fullname" . }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "static-site.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/nginx-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "static-site.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nginx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.nginx.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.nginx.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /{{ .Values.site.indexFile }}
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.nginx.resources | nindent 12 }}
+          volumeMounts:
+            - name: site
+              mountPath: /srv/site
+              readOnly: true
+            - name: nginx-tmp
+              mountPath: /tmp
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+        - name: git-sync
+          image: "{{ .Values.gitSync.image.repository }}:{{ .Values.gitSync.image.tag }}"
+          imagePullPolicy: {{ .Values.gitSync.image.pullPolicy }}
+          args:
+            - --repo={{ .Values.site.repository }}
+            - --ref={{ .Values.site.revision }}
+            - --root={{ .Values.gitSync.root }}
+            - --link={{ .Values.gitSync.link }}
+            - --period={{ .Values.gitSync.period }}
+            - --depth={{ .Values.gitSync.depth }}
+            - --max-failures={{ .Values.gitSync.maxFailures }}
+            - --ssh-key-file=/etc/git-secret/ssh
+            - --ssh-known-hosts=true
+            - --ssh-known-hosts-file=/etc/git-secret/known_hosts
+            - --http-bind=:2020
+          securityContext:
+            {{- toYaml .Values.gitSync.securityContext | nindent 12 }}
+          ports:
+            - name: git-sync-http
+              containerPort: 2020
+          startupProbe:
+            httpGet:
+              path: /
+              port: git-sync-http
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /
+              port: git-sync-http
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.gitSync.resources | nindent 12 }}
+          volumeMounts:
+            - name: site
+              mountPath: {{ .Values.gitSync.root }}
+            - name: git-sync-tmp
+              mountPath: /tmp
+            - name: git-credentials
+              mountPath: /etc/git-secret
+              readOnly: true
+      volumes:
+        - name: site
+          emptyDir: {}
+        - name: nginx-tmp
+          emptyDir: {}
+        - name: git-sync-tmp
+          emptyDir: {}
+        - name: nginx-config
+          configMap:
+            name: {{ include "static-site.fullname" . }}-nginx
+        - name: git-credentials
+          secret:
+            secretName: {{ .Values.gitCredentials.secretName }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.gitCredentials.privateKeyKey }}
+                path: ssh
+              - key: {{ .Values.gitCredentials.knownHostsKey }}
+                path: known_hosts
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

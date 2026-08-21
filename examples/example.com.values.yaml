@@ -1,0 +1,14 @@
+site:
+  repository: git@github.com:your-org/example.com.git
+  revision: main
+
+gitCredentials:
+  # The 1Password Operator must create this Secret before the pod starts.
+  secretName: example-com-git
+
+ingress:
+  hostname: example.com
+  tls:
+    # Leave empty when Traefik obtains TLS without a per-Ingress Secret.
+    secretName: example-com-tls
+

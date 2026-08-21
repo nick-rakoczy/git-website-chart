@@ -1,0 +1,7 @@
+{{- if .Values.ingress.enabled }}
+Site URL: https://{{ .Values.ingress.hostname }}
+{{- else }}
+Port-forward with:
+  kubectl port-forward service/{{ include "static-site.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
