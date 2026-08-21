@@ -79,7 +79,8 @@ service:
 
 ingress:
   enabled: true
-  className: traefik
+  # Leave empty to use the cluster's default IngressClass.
+  className: ""
   annotations: {}
   hostname: ""
   path: /
