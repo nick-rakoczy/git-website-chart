@@ -40,9 +40,15 @@ gitSync:
 
 gitCredentials:
   # Name of an existing Secret populated by the 1Password Operator.
+  # Defaults to <release fullname>-git when empty.
   secretName: ""
   privateKeyKey: ssh
   knownHostsKey: known-hosts
+  onePassword:
+    # Create a OnePasswordItem which provisions the Secret used by this chart.
+    enabled: false
+    itemPath: ""
+    annotations: {}
 
 nginx:
   port: 8080

@@ -11,8 +11,8 @@ the checkout with nginx through a read-only volume mount.
 - A Kubernetes Secret containing a read-only GitHub SSH deploy key
 - The GitHub SSH host key in the same Secret
 
-The chart consumes an existing Secret; it does not create a 1Password
-`OnePasswordItem`. Configure the 1Password Operator to produce a Secret like:
+The chart can create a 1Password `OnePasswordItem`, or consume an existing
+Secret. The resulting Secret must look like:
 
 ```yaml
 apiVersion: v1
@@ -33,10 +33,21 @@ Store the real values in 1Password. Do not commit the private key. Obtain and
 verify GitHub's current host keys from GitHub's documentation rather than
 copying the placeholder above.
 
-Create two fields on the 1Password item named `ssh` and `known-hosts`. Then
-copy `examples/onepassword-item.yaml` into the site's Argo CD configuration and
-set `spec.itemPath` to that item. Its `metadata.name` must match
-`gitCredentials.secretName`.
+Create two fields on the 1Password item named `ssh` and `known-hosts`. Enable
+provisioning directly from the chart with:
+
+```yaml
+gitCredentials:
+  # Optional; defaults to <release fullname>-git.
+  secretName: example-com-git
+  onePassword:
+    enabled: true
+    itemPath: vaults/Kubernetes/items/example-com-git
+```
+
+The operator creates a Secret with the same name as the generated
+`OnePasswordItem`. To use an existing Secret instead, leave
+`onePassword.enabled: false` and set `gitCredentials.secretName`.
 
 ## Install or render
 

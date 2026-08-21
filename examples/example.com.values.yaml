@@ -3,12 +3,13 @@ site:
   revision: main
 
 gitCredentials:
-  # The 1Password Operator must create this Secret before the pod starts.
   secretName: example-com-git
+  onePassword:
+    enabled: true
+    itemPath: vaults/Kubernetes/items/example-com-git
 
 ingress:
   hostname: example.com
   tls:
     # Leave empty when Traefik obtains TLS without a per-Ingress Secret.
     secretName: example-com-tls
-

@@ -15,12 +15,39 @@
     },
     "gitCredentials": {
       "type": "object",
-      "required": ["secretName", "privateKeyKey", "knownHostsKey"],
+      "required": ["privateKeyKey", "knownHostsKey", "onePassword"],
       "properties": {
-        "secretName": { "type": "string", "minLength": 1 },
+        "secretName": { "type": "string" },
         "privateKeyKey": { "type": "string", "minLength": 1 },
-        "knownHostsKey": { "type": "string", "minLength": 1 }
-      }
+        "knownHostsKey": { "type": "string", "minLength": 1 },
+        "onePassword": {
+          "type": "object",
+          "required": ["enabled", "itemPath"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "itemPath": { "type": "string" },
+            "annotations": { "type": "object" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "onePassword": {
+                "properties": { "enabled": { "const": true } }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "onePassword": {
+                "properties": { "itemPath": { "minLength": 1 } }
+              }
+            }
+          }
+        }
+      ]
     },
     "ingress": {
       "type": "object",
@@ -31,4 +58,3 @@
     }
   }
 }
-

@@ -22,3 +22,6 @@ app.kubernetes.io/name: {{ include "static-site.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
+{{- define "static-site.gitSecretName" -}}
+{{- default (printf "%s-git" (include "static-site.fullname" .)) .Values.gitCredentials.secretName | trunc 63 | trimSuffix "-" }}
+{{- end }}
