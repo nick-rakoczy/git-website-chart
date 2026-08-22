@@ -54,9 +54,12 @@ workflow:
     fsGroupChangePolicy: OnRootMismatch
   mutexName: ""
   git:
+    image:
+      repository: registry.k8s.io/git-sync/git-sync
+      tag: v4.7.0
+      pullPolicy: IfNotPresent
     depth: 1
     disableSubmodules: true
-    insecureIgnoreHostKey: false
   publishImage:
     repository: alpine
     tag: "3.22"
@@ -101,11 +104,19 @@ events:
         secretName: ""
 
 gitCredentials:
+  # Authentication mode: "ssh" or "githubApp".
+  authentication: ssh
   # Name of an existing Secret populated by the 1Password Operator.
   # Defaults to <release fullname>-git when empty.
   secretName: ""
   # 1Password SSH Key items expose "private key" as "private-key".
   privateKeyKey: private-key
+  knownHostsKey: known-hosts
+  githubApp:
+    # Secret keys populated from the corresponding 1Password item fields.
+    applicationIdKey: application_id
+    installationIdKey: installation_id
+    privateKeyKey: private_key
   onePassword:
     # Create a OnePasswordItem which provisions the Secret used by this chart.
     enabled: false

@@ -60,6 +60,22 @@ spec:
     - name: site
       persistentVolumeClaim:
         claimName: {{ include "static-site.pvcName" . }}
+    - name: source
+      emptyDir: {}
+    - name: git-credentials
+      secret:
+        secretName: {{ include "static-site.gitSecretName" . }}
+        defaultMode: 0440
+        items:
+          {{- if eq .Values.gitCredentials.authentication "ssh" }}
+          - key: {{ .Values.gitCredentials.privateKeyKey }}
+            path: ssh
+          - key: {{ .Values.gitCredentials.knownHostsKey }}
+            path: known_hosts
+          {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
+          - key: {{ .Values.gitCredentials.githubApp.privateKeyKey }}
+            path: private-key.pem
+          {{- end }}
   templates:
     - name: pipeline
       dag:
@@ -86,19 +102,8 @@ spec:
 
     {{- range $index, $stage := .Values.build }}
     - name: build-{{ $index }}
-      inputs:
-        artifacts:
-          - name: source
-            path: /workspace/source
-            git:
-              repo: {{ $.Values.site.repository | quote }}
-              revision: {{ "{{workflow.parameters.revision}}" | quote }}
-              depth: {{ $.Values.workflow.git.depth }}
-              disableSubmodules: {{ $.Values.workflow.git.disableSubmodules }}
-              insecureIgnoreHostKey: {{ $.Values.workflow.git.insecureIgnoreHostKey }}
-              sshPrivateKeySecret:
-                name: {{ include "static-site.gitSecretName" $ }}
-                key: {{ $.Values.gitCredentials.privateKeyKey }}
+      initContainers:
+        {{- include "static-site.gitSyncInitContainer" $ | nindent 8 }}
       container:
         image: "{{ $stage.image.repository }}:{{ $stage.image.tag }}"
         imagePullPolicy: {{ $stage.image.pullPolicy }}
@@ -127,6 +132,8 @@ spec:
         volumeMounts:
           - name: site
             mountPath: /site
+          - name: source
+            mountPath: /workspace
         {{- with $stage.resources }}
         resources:
           {{- toYaml . | nindent 10 }}
@@ -139,19 +146,8 @@ spec:
 
     {{- if not .Values.build }}
     - name: copy-source
-      inputs:
-        artifacts:
-          - name: source
-            path: /workspace/source
-            git:
-              repo: {{ .Values.site.repository | quote }}
-              revision: {{ "{{workflow.parameters.revision}}" | quote }}
-              depth: {{ .Values.workflow.git.depth }}
-              disableSubmodules: {{ .Values.workflow.git.disableSubmodules }}
-              insecureIgnoreHostKey: {{ .Values.workflow.git.insecureIgnoreHostKey }}
-              sshPrivateKeySecret:
-                name: {{ include "static-site.gitSecretName" . }}
-                key: {{ .Values.gitCredentials.privateKeyKey }}
+      initContainers:
+        {{- include "static-site.gitSyncInitContainer" . | nindent 8 }}
       container:
         image: "{{ .Values.workflow.publishImage.repository }}:{{ .Values.workflow.publishImage.tag }}"
         imagePullPolicy: {{ .Values.workflow.publishImage.pullPolicy }}
@@ -168,6 +164,8 @@ spec:
         volumeMounts:
           - name: site
             mountPath: /site
+          - name: source
+            mountPath: /workspace
     {{- end }}
 
     - name: publish

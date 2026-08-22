@@ -61,3 +61,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "static-site.eventsSubmitRoleName" -}}
 {{- printf "%s-events-submit" ((include "static-site.fullname" .) | trunc 49 | trimSuffix "-") }}
 {{- end }}
+
+{{- define "static-site.gitSyncInitContainer" -}}
+- name: git-sync
+  image: "{{ .Values.workflow.git.image.repository }}:{{ .Values.workflow.git.image.tag }}"
+  imagePullPolicy: {{ .Values.workflow.git.image.pullPolicy }}
+  args:
+    - {{ printf "--repo=%s" .Values.site.repository | quote }}
+    - {{ "--ref={{workflow.parameters.revision}}" | quote }}
+    - --root=/workspace
+    - --link=source
+    - --one-time=true
+    - --depth={{ .Values.workflow.git.depth }}
+    - --submodules={{ ternary "off" "recursive" .Values.workflow.git.disableSubmodules }}
+    - --git-gc=off
+    {{- if eq .Values.gitCredentials.authentication "ssh" }}
+    - --ssh-key-file=/etc/git-secret/ssh
+    - --ssh-known-hosts=true
+    - --ssh-known-hosts-file=/etc/git-secret/known_hosts
+    {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
+    - --github-app-private-key-file=/etc/git-secret/private-key.pem
+    {{- end }}
+  {{- if eq .Values.gitCredentials.authentication "githubApp" }}
+  env:
+    - name: GITSYNC_GITHUB_APP_APPLICATION_ID
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "static-site.gitSecretName" . }}
+          key: {{ .Values.gitCredentials.githubApp.applicationIdKey }}
+    - name: GITSYNC_GITHUB_APP_INSTALLATION_ID
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "static-site.gitSecretName" . }}
+          key: {{ .Values.gitCredentials.githubApp.installationIdKey }}
+  {{- end }}
+  volumeMounts:
+    - name: source
+      mountPath: /workspace
+    - name: git-credentials
+      mountPath: /etc/git-secret
+      readOnly: true
+{{- end }}

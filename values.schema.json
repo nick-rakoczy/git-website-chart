@@ -70,11 +70,19 @@
         "mutexName": { "type": "string" },
         "git": {
           "type": "object",
-          "required": ["depth", "disableSubmodules", "insecureIgnoreHostKey"],
+          "required": ["image", "depth", "disableSubmodules"],
           "properties": {
+            "image": {
+              "type": "object",
+              "required": ["repository", "tag", "pullPolicy"],
+              "properties": {
+                "repository": { "type": "string", "minLength": 1 },
+                "tag": { "type": "string", "minLength": 1 },
+                "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+              }
+            },
             "depth": { "type": "integer", "minimum": 0 },
-            "disableSubmodules": { "type": "boolean" },
-            "insecureIgnoreHostKey": { "type": "boolean" }
+            "disableSubmodules": { "type": "boolean" }
           }
         },
         "publishImage": {
@@ -195,10 +203,21 @@
     },
     "gitCredentials": {
       "type": "object",
-      "required": ["privateKeyKey", "onePassword"],
+      "required": ["authentication", "privateKeyKey", "knownHostsKey", "githubApp", "onePassword"],
       "properties": {
+        "authentication": { "type": "string", "enum": ["ssh", "githubApp"] },
         "secretName": { "type": "string" },
         "privateKeyKey": { "type": "string", "minLength": 1 },
+        "knownHostsKey": { "type": "string", "minLength": 1 },
+        "githubApp": {
+          "type": "object",
+          "required": ["applicationIdKey", "installationIdKey", "privateKeyKey"],
+          "properties": {
+            "applicationIdKey": { "type": "string", "minLength": 1 },
+            "installationIdKey": { "type": "string", "minLength": 1 },
+            "privateKeyKey": { "type": "string", "minLength": 1 }
+          }
+        },
         "onePassword": {
           "type": "object",
           "required": ["enabled", "itemPath"],

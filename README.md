@@ -14,7 +14,8 @@ the workflow publishes the checked-out repository contents directly.
 - Argo Workflows watching the release namespace
 - Argo Events and an EventBus when `events.enabled` is true
 - A node on which nginx and every Workflow pod can be scheduled together
-- A Secret containing a read-only SSH deploy key for the site repository
+- A GitHub App with read-only Contents access, or a read-only SSH deploy key
+- A Kubernetes Secret containing the selected authentication credentials
 
 `ReadWriteOnce` permits the claim to be mounted by multiple pods on one node.
 Set the same node selector for nginx and the Workflow. By default,
@@ -23,7 +24,64 @@ Set the same node selector for nginx and the Workflow. By default,
 ## Git credentials
 
 The chart can consume an existing Secret or create a 1Password
-`OnePasswordItem`. The resulting Secret must contain the SSH private key:
+`OnePasswordItem`.
+
+### GitHub App authentication
+
+GitHub App authentication is recommended when multiple sites share access to
+private repositories. Install the App on the required repositories with
+read-only Contents access. The 1Password item must contain fields named
+`application_id`, `installation_id`, and `private_key`; the resulting Secret
+must look like:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: static-sites-git
+type: Opaque
+stringData:
+  application_id: "123456"
+  installation_id: "12345678"
+  private_key: |-
+    -----BEGIN RSA PRIVATE KEY-----
+    ...
+    -----END RSA PRIVATE KEY-----
+```
+
+Configure the chart with an HTTPS repository URL:
+
+```yaml
+site:
+  repository: https://github.com/your-org/example.com.git
+
+gitCredentials:
+  authentication: githubApp
+  secretName: static-sites-git
+  onePassword:
+    enabled: true
+    itemPath: vaults/Kubernetes/items/static-sites-git
+```
+
+Each build pod runs `git-sync` once before the build. It uses the App private
+key to mint a short-lived installation token, just as the previous sidecar did.
+To use an existing Secret, leave `onePassword.enabled: false` and set
+`gitCredentials.secretName`.
+
+Override the Secret field names when necessary:
+
+```yaml
+gitCredentials:
+  githubApp:
+    applicationIdKey: application_id
+    installationIdKey: installation_id
+    privateKeyKey: private_key
+```
+
+### SSH authentication
+
+SSH remains the default for backward compatibility. Its Secret must contain an
+OpenSSH private key and verified host keys:
 
 ```yaml
 apiVersion: v1
@@ -36,22 +94,24 @@ stringData:
     -----BEGIN OPENSSH PRIVATE KEY-----
     ...
     -----END OPENSSH PRIVATE KEY-----
+  known-hosts: |-
+    github.com ssh-ed25519 <verified-github-host-key>
 ```
 
-For 1Password Operator provisioning:
+Use an SSH repository URL and select the mode explicitly when desired:
 
 ```yaml
+site:
+  repository: git@github.com:your-org/example.com.git
+
 gitCredentials:
+  authentication: ssh
   secretName: example-com-git
-  onePassword:
-    enabled: true
-    itemPath: vaults/Kubernetes/items/example-com-git
 ```
 
-The Workflow uses Argo's Git input artifact support. Its executor image already
-contains host keys for major public Git providers such as GitHub. Set
-`workflow.git.insecureIgnoreHostKey` only for a host whose key cannot otherwise
-be verified.
+Store real credentials in 1Password; do not commit them. Obtain and verify
+GitHub's current host keys from GitHub's documentation rather than copying the
+placeholder above.
 
 ## Configure builds
 
