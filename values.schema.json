@@ -15,11 +15,21 @@
     },
     "gitCredentials": {
       "type": "object",
-      "required": ["privateKeyKey", "knownHostsKey", "onePassword"],
+      "required": ["authentication", "privateKeyKey", "knownHostsKey", "githubApp", "onePassword"],
       "properties": {
+        "authentication": { "type": "string", "enum": ["ssh", "githubApp"] },
         "secretName": { "type": "string" },
         "privateKeyKey": { "type": "string", "minLength": 1 },
         "knownHostsKey": { "type": "string", "minLength": 1 },
+        "githubApp": {
+          "type": "object",
+          "required": ["applicationIdKey", "installationIdKey", "privateKeyKey"],
+          "properties": {
+            "applicationIdKey": { "type": "string", "minLength": 1 },
+            "installationIdKey": { "type": "string", "minLength": 1 },
+            "privateKeyKey": { "type": "string", "minLength": 1 }
+          }
+        },
         "onePassword": {
           "type": "object",
           "required": ["enabled", "itemPath"],

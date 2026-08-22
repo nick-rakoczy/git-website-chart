@@ -1,8 +1,9 @@
 site:
-  repository: git@github.com:your-org/example.com.git
+  repository: https://github.com/your-org/example.com.git
   revision: main
 
 gitCredentials:
+  authentication: githubApp
   secretName: example-com-git
   onePassword:
     enabled: true
