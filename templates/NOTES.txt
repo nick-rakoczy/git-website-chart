@@ -5,3 +5,17 @@ Port-forward with:
   kubectl port-forward service/{{ include "static-site.fullname" . }} 8080:{{ .Values.service.port }}
 {{- end }}
 
+Publish the initial revision with:
+  argo submit --from workflowtemplate/{{ include "static-site.workflowTemplateName" . }} \
+    --namespace {{ .Release.Namespace }} \
+    --parameter revision={{ .Values.site.revision }}
+
+{{- if .Values.events.enabled }}
+{{- if .Values.events.github.ingress.enabled }}
+GitHub webhook endpoint:
+  https://{{ .Values.events.github.ingress.hostname }}{{ .Values.events.github.endpoint }}
+{{- else }}
+GitHub EventSource service:
+  {{ include "static-site.eventSourceName" . }}.{{ include "static-site.eventsNamespace" . }}.svc:{{ .Values.events.github.port }}
+{{- end }}
+{{- end }}

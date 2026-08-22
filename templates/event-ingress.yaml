@@ -1,0 +1,36 @@
+{{- if and .Values.events.enabled .Values.events.github.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "static-site.eventSourceName" . }}
+  namespace: {{ include "static-site.eventsNamespace" . }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+  {{- with .Values.events.github.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.events.github.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "events.github.ingress.hostname is required when the GitHub event ingress is enabled" .Values.events.github.ingress.hostname }}
+      http:
+        paths:
+          - path: {{ .Values.events.github.endpoint }}
+            pathType: {{ .Values.events.github.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "static-site.eventSourceName" . }}
+                port:
+                  name: webhook
+  {{- if .Values.events.github.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.events.github.ingress.hostname }}
+      {{- with .Values.events.github.ingress.tls.secretName }}
+      secretName: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}

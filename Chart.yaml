@@ -1,7 +1,6 @@
 apiVersion: v2
 name: static-site
-description: Serve a private Git repository with nginx and git-sync
+description: Build static Git sites with Argo Workflows and serve them with nginx
 type: application
-version: 0.1.0
+version: 0.4.0
 appVersion: "1.0"
-

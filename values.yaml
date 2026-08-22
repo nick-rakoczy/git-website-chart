@@ -15,28 +15,90 @@ site:
   revision: main
   indexFile: index.html
 
-gitSync:
-  image:
-    repository: registry.k8s.io/git-sync/git-sync
-    tag: v4.7.0
+# Build items run in parallel in Argo Workflow pods. An empty list publishes the
+# repository contents without a build step.
+build: []
+# - name: main
+#   image:
+#     repository: node
+#     tag: 22-alpine
+#     pullPolicy: IfNotPresent
+#   workingDirectory: .
+#   command: npm ci && npm run build
+#   outputDirectory: dist
+#   path: .
+
+persistence:
+  # Use an existing RWO claim when set; otherwise the chart creates one.
+  existingClaim: ""
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 2Gi
+  annotations: {}
+  # Preserve built releases when the Helm release is deleted.
+  retain: true
+
+workflow:
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  # All Workflow pods and nginx must select the same node for an RWO claim.
+  # Defaults to the top-level nodeSelector when empty.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext:
+    fsGroup: 101
+    fsGroupChangePolicy: OnRootMismatch
+  mutexName: ""
+  git:
+    depth: 1
+    disableSubmodules: true
+    insecureIgnoreHostKey: false
+  publishImage:
+    repository: alpine
+    tag: "3.22"
     pullPolicy: IfNotPresent
-  period: 30s
-  depth: 1
-  maxFailures: -1
-  root: /git
-  link: current
-  resources:
-    requests:
-      cpu: 10m
-      memory: 16Mi
-    limits:
-      memory: 64Mi
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
-    readOnlyRootFilesystem: true
+  ttlStrategy:
+    secondsAfterCompletion: 86400
+  podGC:
+    strategy: OnWorkflowSuccess
+
+events:
+  enabled: false
+  # Defaults to the Helm release namespace. Set this to the namespace that
+  # contains your EventBus (commonly argo-events).
+  namespace: ""
+  eventBusName: default
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  github:
+    repositories: []
+    # - owner: your-org
+    #   names:
+    #     - example.com
+    branch: main
+    endpoint: /push
+    port: 12000
+    webhookSecret:
+      name: ""
+      key: secret
+    service:
+      type: ClusterIP
+      annotations: {}
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hostname: ""
+      pathType: Exact
+      tls:
+        enabled: true
+        secretName: ""
 
 gitCredentials:
   # Name of an existing Secret populated by the 1Password Operator.
@@ -44,7 +106,6 @@ gitCredentials:
   secretName: ""
   # 1Password SSH Key items expose "private key" as "private-key".
   privateKeyKey: private-key
-  knownHostsKey: known-hosts
   onePassword:
     # Create a OnePasswordItem which provisions the Secret used by this chart.
     enabled: false

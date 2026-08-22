@@ -1,0 +1,29 @@
+{{- if .Values.events.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: {{ include "static-site.eventSourceName" . }}
+  namespace: {{ include "static-site.eventsNamespace" . }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+spec:
+  eventBusName: {{ .Values.events.eventBusName }}
+  template:
+    serviceAccountName: {{ include "static-site.eventsServiceAccountName" . }}
+  github:
+    push:
+      repositories:
+        {{- toYaml .Values.events.github.repositories | nindent 8 }}
+      webhook:
+        endpoint: {{ .Values.events.github.endpoint | quote }}
+        port: {{ .Values.events.github.port | quote }}
+        method: POST
+      events:
+        - push
+      webhookSecret:
+        name: {{ required "events.github.webhookSecret.name is required when events are enabled" .Values.events.github.webhookSecret.name }}
+        key: {{ .Values.events.github.webhookSecret.key }}
+      insecure: false
+      active: true
+      contentType: json
+{{- end }}

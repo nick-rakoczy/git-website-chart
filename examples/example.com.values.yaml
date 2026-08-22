@@ -2,6 +2,36 @@ site:
   repository: git@github.com:your-org/example.com.git
   revision: main
 
+build:
+  - name: main
+    image:
+      repository: node
+      tag: 22-alpine
+      pullPolicy: IfNotPresent
+    workingDirectory: .
+    command: npm ci && npm run build
+    outputDirectory: dist
+    path: .
+
+# A ReadWriteOnce claim can be shared by these pods only on the same node.
+nodeSelector:
+  kubernetes.io/hostname: worker-1
+
+events:
+  enabled: true
+  namespace: argo-events
+  github:
+    repositories:
+      - owner: your-org
+        names:
+          - example.com
+    branch: main
+    webhookSecret:
+      name: example-com-github-webhook
+    ingress:
+      enabled: true
+      hostname: hooks.example.com
+
 gitCredentials:
   secretName: example-com-git
   onePassword:

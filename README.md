@@ -1,18 +1,29 @@
 # Static site Helm chart
 
-This chart serves a private Git repository with nginx. A `git-sync` sidecar
-polls a branch, publishes each checkout through an atomic symlink, and shares
-the checkout with nginx through a read-only volume mount.
+This chart builds a private Git repository with Argo Workflows and serves the
+published static files with nginx. Build tasks may use different images and run
+in parallel. A successful workflow assembles their outputs on a persistent
+volume and atomically switches nginx to the new release.
+
+Repositories without a build step are also supported: leave `build` empty and
+the workflow publishes the checked-out repository contents directly.
 
 ## Prerequisites
 
-- Kubernetes 1.34+
-- Argo CD (optional, but expected for this repository layout)
-- A Kubernetes Secret containing a read-only GitHub SSH deploy key
-- The GitHub SSH host key in the same Secret
+- Kubernetes with a filesystem-backed `ReadWriteOnce` storage class
+- Argo Workflows watching the release namespace
+- Argo Events and an EventBus when `events.enabled` is true
+- A node on which nginx and every Workflow pod can be scheduled together
+- A Secret containing a read-only SSH deploy key for the site repository
 
-The chart can create a 1Password `OnePasswordItem`, or consume an existing
-Secret. The resulting Secret must look like:
+`ReadWriteOnce` permits the claim to be mounted by multiple pods on one node.
+Set the same node selector for nginx and the Workflow. By default,
+`workflow.nodeSelector` inherits the chart's top-level `nodeSelector`.
+
+## Git credentials
+
+The chart can consume an existing Secret or create a 1Password
+`OnePasswordItem`. The resulting Secret must contain the SSH private key:
 
 ```yaml
 apiVersion: v1
@@ -25,41 +36,82 @@ stringData:
     -----BEGIN OPENSSH PRIVATE KEY-----
     ...
     -----END OPENSSH PRIVATE KEY-----
-  known-hosts: |-
-    github.com ssh-ed25519 <verified-github-host-key>
 ```
 
-Store the real values in 1Password. Do not commit the private key. Obtain and
-verify GitHub's current host keys from GitHub's documentation rather than
-copying the placeholder above.
-
-Use a 1Password **SSH Key** item and add a custom text field named
-`known-hosts`. The operator normalizes the built-in `private key` field to the
-Secret key `private-key`; `known-hosts` keeps its name. Enable provisioning
-directly from the chart with:
+For 1Password Operator provisioning:
 
 ```yaml
 gitCredentials:
-  # Optional; defaults to <release fullname>-git.
   secretName: example-com-git
   onePassword:
     enabled: true
     itemPath: vaults/Kubernetes/items/example-com-git
 ```
 
-The operator creates a Secret with the same name as the generated
-`OnePasswordItem`. To use an existing Secret instead, leave
-`onePassword.enabled: false` and set `gitCredentials.secretName`.
+The Workflow uses Argo's Git input artifact support. Its executor image already
+contains host keys for major public Git providers such as GitHub. Set
+`workflow.git.insecureIgnoreHostKey` only for a host whose key cannot otherwise
+be verified.
 
-If an existing Secret uses different key names, override them explicitly:
+## Configure builds
+
+Each build item has its own container image. `workingDirectory` is relative to
+the repository root, `outputDirectory` is relative to that working directory,
+and `path` is relative to the hosted site root.
 
 ```yaml
-gitCredentials:
-  privateKeyKey: private-key
-  knownHostsKey: known-hosts
+build:
+  - name: main
+    image:
+      repository: node
+      tag: 22-alpine
+      pullPolicy: IfNotPresent
+    workingDirectory: apps/web
+    command: npm ci && npm run build
+    outputDirectory: dist
+    path: .
+
+  - name: docs
+    image:
+      repository: node
+      tag: 20-alpine
+      pullPolicy: IfNotPresent
+    workingDirectory: apps/docs
+    command: npm ci && npm run build
+    outputDirectory: build
+    path: docs
 ```
 
-## Install or render
+The example publishes `apps/web/dist` at `/` and `apps/docs/build` at `/docs`.
+Build tasks run in parallel against separate checkouts of the same revision.
+After all tasks succeed, a publication task merges outputs in list order. A
+failed workflow leaves the currently served release unchanged.
+
+Build images must provide `/bin/sh`, `cp`, and the tools used by their command.
+
+## Persistent releases and node placement
+
+The chart creates a retained 2 GiB RWO claim by default. To use an existing
+claim:
+
+```yaml
+persistence:
+  existingClaim: example-com-site
+```
+
+Pin nginx and Workflow pods to the same node:
+
+```yaml
+nodeSelector:
+  kubernetes.io/hostname: worker-1
+```
+
+You can instead set `workflow.nodeSelector` separately, but it must resolve to
+the same node. Workflow-level mutex synchronization prevents two revisions from
+publishing concurrently. The volume retains the current and immediately
+previous releases.
+
+## Install and publish manually
 
 ```sh
 helm upgrade --install example-com . \
@@ -68,23 +120,76 @@ helm upgrade --install example-com . \
   --values examples/example.com.values.yaml
 ```
 
+The nginx readiness probe remains false until the first successful publication.
+Submit the default revision from `site.revision`:
+
 ```sh
-helm template example-com . \
+argo submit --from workflowtemplate/example-com-static-site-build \
   --namespace example-com \
-  --values examples/example.com.values.yaml
+  --watch
 ```
 
-For Argo CD, copy `examples/application.yaml` and adjust its repository,
-namespace, and values file.
+Or publish an exact commit:
+
+```sh
+argo submit --from workflowtemplate/example-com-static-site-build \
+  --namespace example-com \
+  --parameter revision=<commit-sha> \
+  --watch
+```
+
+Use the actual generated template name shown by `helm install` notes when the
+release or chart name differs.
+
+## GitHub push events
+
+Set `events.enabled` to render a GitHub EventSource, Sensor, webhook Service,
+minimal RBAC, and optional Ingress:
+
+```yaml
+events:
+  enabled: true
+  # Set this when the EventBus is not in the site's namespace.
+  namespace: argo-events
+  github:
+    repositories:
+      - owner: your-org
+        names:
+          - example.com
+    branch: main
+    webhookSecret:
+      name: example-com-github-webhook
+      key: secret
+    ingress:
+      enabled: true
+      hostname: hooks.example.com
+```
+
+The EventSource and Sensor are created in `events.namespace`, which defaults to
+the Helm release namespace. The named EventBus and GitHub webhook Secret must
+exist in that namespace. The Sensor receives narrowly scoped permission to
+create the resulting Workflow in the site's release namespace.
+
+Create `example-com-github-webhook` with a strong random `secret` value in the
+events namespace, then configure the GitHub repository webhook with the same
+secret, content type `application/json`, the `push` event, and this payload URL:
+
+```text
+https://hooks.example.com/push
+```
+
+The Sensor accepts pushes only for `events.github.branch` and passes the
+payload's immutable `after` commit SHA to the WorkflowTemplate. The EventSource
+and Sensor can run on any node because they do not mount the site claim.
 
 ## Deployment behavior
 
-Each pod independently polls the configured branch. A push does not require an
-Argo CD sync or a pod restart. During startup the nginx readiness probe fails
-until the configured index file is present. Set `replicaCount` above one when
-you want pod-restart availability as well as atomic in-pod content updates.
+nginx serves `/srv/site/current`, an atomic symlink maintained by successful
+workflows. Site updates do not restart nginx. The chart creates narrowly scoped
+service accounts: Workflow pods may report `workflowtaskresults`, while the
+Sensor may read its webhook secret and create Workflow resources.
 
-The default nginx security context runs as UID/GID 101, matching the official
-nginx Alpine image. If a custom nginx image uses a different non-root account,
-override `nginx.securityContext.runAsUser`, `runAsGroup`, and the pod
-`fsGroup` to match it.
+The default nginx security context runs as UID/GID 101. If a custom nginx image
+uses another account, update `nginx.securityContext` and the nginx
+`podSecurityContext`. Keep the Workflow `fsGroup` compatible with nginx so
+published files remain readable.

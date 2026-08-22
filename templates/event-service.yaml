@@ -1,0 +1,22 @@
+{{- if .Values.events.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "static-site.eventSourceName" . }}
+  namespace: {{ include "static-site.eventsNamespace" . }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+  {{- with .Values.events.github.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.events.github.service.type }}
+  ports:
+    - name: webhook
+      port: {{ .Values.events.github.port }}
+      targetPort: {{ .Values.events.github.port }}
+      protocol: TCP
+  selector:
+    eventsource-name: {{ include "static-site.eventSourceName" . }}
+{{- end }}
