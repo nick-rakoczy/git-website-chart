@@ -83,3 +83,8 @@ Each pod independently polls the configured branch. A push does not require an
 Argo CD sync or a pod restart. During startup the nginx readiness probe fails
 until the configured index file is present. Set `replicaCount` above one when
 you want pod-restart availability as well as atomic in-pod content updates.
+
+The default nginx security context runs as UID/GID 101, matching the official
+nginx Alpine image. If a custom nginx image uses a different non-root account,
+override `nginx.securityContext.runAsUser`, `runAsGroup`, and the pod
+`fsGroup` to match it.

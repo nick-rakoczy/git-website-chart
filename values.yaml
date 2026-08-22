@@ -67,6 +67,11 @@ nginx:
       drop:
         - ALL
     readOnlyRootFilesystem: true
+    # The official nginx Alpine image uses UID/GID 101. Running the master as
+    # that user avoids requiring CHOWN for temporary directories.
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
 
 podSecurityContext:
   fsGroup: 101
