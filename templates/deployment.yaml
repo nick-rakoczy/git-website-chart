@@ -79,10 +79,27 @@ spec:
             - --period={{ .Values.gitSync.period }}
             - --depth={{ .Values.gitSync.depth }}
             - --max-failures={{ .Values.gitSync.maxFailures }}
+            {{- if eq .Values.gitCredentials.authentication "ssh" }}
             - --ssh-key-file=/etc/git-secret/ssh
             - --ssh-known-hosts=true
             - --ssh-known-hosts-file=/etc/git-secret/known_hosts
+            {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
+            - --github-app-private-key-file=/etc/git-secret/private-key.pem
+            {{- end }}
             - --http-bind=:2020
+          {{- if eq .Values.gitCredentials.authentication "githubApp" }}
+          env:
+            - name: GITSYNC_GITHUB_APP_APPLICATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "static-site.gitSecretName" . }}
+                  key: {{ .Values.gitCredentials.githubApp.applicationIdKey }}
+            - name: GITSYNC_GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "static-site.gitSecretName" . }}
+                  key: {{ .Values.gitCredentials.githubApp.installationIdKey }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.gitSync.securityContext | nindent 12 }}
           ports:
@@ -124,10 +141,15 @@ spec:
             secretName: {{ include "static-site.gitSecretName" . }}
             defaultMode: 0440
             items:
+              {{- if eq .Values.gitCredentials.authentication "ssh" }}
               - key: {{ .Values.gitCredentials.privateKeyKey }}
                 path: ssh
               - key: {{ .Values.gitCredentials.knownHostsKey }}
                 path: known_hosts
+              {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
+              - key: {{ .Values.gitCredentials.githubApp.privateKeyKey }}
+                path: private-key.pem
+              {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

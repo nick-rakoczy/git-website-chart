@@ -8,11 +8,68 @@ the checkout with nginx through a read-only volume mount.
 
 - Kubernetes 1.34+
 - Argo CD (optional, but expected for this repository layout)
-- A Kubernetes Secret containing a read-only GitHub SSH deploy key
-- The GitHub SSH host key in the same Secret
+- A GitHub App with read-only Contents access, or a read-only GitHub SSH
+  deploy key
+- A Kubernetes Secret containing the selected authentication credentials
 
 The chart can create a 1Password `OnePasswordItem`, or consume an existing
-Secret. The resulting Secret must look like:
+Secret.
+
+### GitHub App authentication
+
+GitHub App authentication is recommended when multiple sites share access to
+private repositories. Install the App on the required repositories with
+read-only Contents access. The 1Password item must contain fields named
+`application_id`, `installation_id`, and `private_key`; the resulting Secret
+must look like:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: static-sites-git
+type: Opaque
+stringData:
+  application_id: "123456"
+  installation_id: "12345678"
+  private_key: |-
+    -----BEGIN RSA PRIVATE KEY-----
+    ...
+    -----END RSA PRIVATE KEY-----
+```
+
+Configure the chart with an HTTPS repository URL:
+
+```yaml
+site:
+  repository: https://github.com/your-org/example.com.git
+
+gitCredentials:
+  authentication: githubApp
+  secretName: static-sites-git
+  onePassword:
+    enabled: true
+    itemPath: vaults/Kubernetes/items/static-sites-git
+```
+
+`git-sync` uses the App private key to mint and refresh short-lived
+installation tokens automatically. To use an existing Secret, leave
+`onePassword.enabled: false` and set `gitCredentials.secretName`.
+
+Override the Secret field names when necessary:
+
+```yaml
+gitCredentials:
+  githubApp:
+    applicationIdKey: application_id
+    installationIdKey: installation_id
+    privateKeyKey: private_key
+```
+
+### SSH authentication
+
+SSH remains the default authentication mode for backward compatibility. Its
+Secret must look like:
 
 ```yaml
 apiVersion: v1
@@ -40,6 +97,7 @@ directly from the chart with:
 
 ```yaml
 gitCredentials:
+  authentication: ssh
   # Optional; defaults to <release fullname>-git.
   secretName: example-com-git
   onePassword:
@@ -48,8 +106,7 @@ gitCredentials:
 ```
 
 The operator creates a Secret with the same name as the generated
-`OnePasswordItem`. To use an existing Secret instead, leave
-`onePassword.enabled: false` and set `gitCredentials.secretName`.
+`OnePasswordItem`.
 
 If an existing Secret uses different key names, override them explicitly:
 
