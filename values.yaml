@@ -15,7 +15,7 @@ site:
   revision: main
   indexFile: index.html
 
-# Build items run in parallel in Argo Workflow pods. An empty list publishes the
+# Build items run in parallel as Tekton TaskRuns. An empty list publishes the
 # repository contents without a build step.
 build: []
 # - name: main
@@ -39,12 +39,12 @@ persistence:
   # Preserve built releases when the Helm release is deleted.
   retain: true
 
-workflow:
+pipeline:
   serviceAccount:
     create: true
     name: ""
     annotations: {}
-  # All Workflow pods and nginx must select the same node for an RWO claim.
+  # All TaskRun pods and nginx must select the same node for an RWO claim.
   # Defaults to the top-level nodeSelector when empty.
   nodeSelector: {}
   tolerations: []
@@ -52,7 +52,6 @@ workflow:
   podSecurityContext:
     fsGroup: 101
     fsGroupChangePolicy: OnRootMismatch
-  mutexName: ""
   git:
     image:
       repository: registry.k8s.io/git-sync/git-sync
@@ -61,38 +60,29 @@ workflow:
     depth: 1
     disableSubmodules: true
   publishImage:
-    repository: alpine
-    tag: "3.22"
+    # This image must provide /bin/sh, flock, cp, find, ln, and GNU mv.
+    repository: debian
+    tag: bookworm-slim
     pullPolicy: IfNotPresent
-  ttlStrategy:
-    secondsAfterCompletion: 86400
-  podGC:
-    strategy: OnWorkflowSuccess
+  timeouts:
+    pipeline: 2h
+    tasks: 1h50m
+    finally: 10m
 
-events:
+triggers:
   enabled: false
-  # Defaults to the Helm release namespace. Set this to the namespace that
-  # contains your EventBus (commonly argo-events).
+  # Defaults to the Helm release namespace.
   namespace: ""
-  eventBusName: default
   serviceAccount:
     create: true
     name: ""
     annotations: {}
   github:
-    repositories: []
-    # - owner: your-org
-    #   names:
-    #     - example.com
     branch: main
     endpoint: /push
-    port: 12000
     webhookSecret:
       name: ""
       key: secret
-    service:
-      type: ClusterIP
-      annotations: {}
     ingress:
       enabled: false
       className: ""

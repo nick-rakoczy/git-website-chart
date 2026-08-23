@@ -6,16 +6,19 @@ Port-forward with:
 {{- end }}
 
 Publish the initial revision with:
-  argo submit --from workflowtemplate/{{ include "static-site.workflowTemplateName" . }} \
+  tkn pipeline start {{ include "static-site.pipelineName" . }} \
     --namespace {{ .Release.Namespace }} \
-    --parameter revision={{ .Values.site.revision }}
+    --param revision={{ .Values.site.revision }} \
+    --workspace name=site,claimName={{ include "static-site.pvcName" . }} \
+    --serviceaccount {{ include "static-site.pipelineServiceAccountName" . }} \
+    --showlog
 
-{{- if .Values.events.enabled }}
-{{- if .Values.events.github.ingress.enabled }}
+{{- if .Values.triggers.enabled }}
+{{- if .Values.triggers.github.ingress.enabled }}
 GitHub webhook endpoint:
-  https://{{ .Values.events.github.ingress.hostname }}{{ .Values.events.github.endpoint }}
+  https://{{ .Values.triggers.github.ingress.hostname }}{{ .Values.triggers.github.endpoint }}
 {{- else }}
-GitHub EventSource service:
-  {{ include "static-site.eventSourceName" . }}.{{ include "static-site.eventsNamespace" . }}.svc:{{ .Values.events.github.port }}
+Tekton EventListener service:
+  http://{{ include "static-site.eventListenerServiceName" . }}.{{ include "static-site.triggersNamespace" . }}.svc:8080{{ .Values.triggers.github.endpoint }}
 {{- end }}
 {{- end }}

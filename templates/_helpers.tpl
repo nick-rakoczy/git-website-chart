@@ -34,46 +34,46 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default (printf "%s-site" ((include "static-site.fullname" .) | trunc 58 | trimSuffix "-")) .Values.persistence.existingClaim | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "static-site.workflowServiceAccountName" -}}
-{{- default (printf "%s-workflow" ((include "static-site.fullname" .) | trunc 54 | trimSuffix "-")) .Values.workflow.serviceAccount.name | trunc 63 | trimSuffix "-" }}
+{{- define "static-site.pipelineServiceAccountName" -}}
+{{- default (printf "%s-pipeline" ((include "static-site.fullname" .) | trunc 54 | trimSuffix "-")) .Values.pipeline.serviceAccount.name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "static-site.eventsServiceAccountName" -}}
-{{- default (printf "%s-events" ((include "static-site.fullname" .) | trunc 56 | trimSuffix "-")) .Values.events.serviceAccount.name | trunc 63 | trimSuffix "-" }}
+{{- define "static-site.triggersServiceAccountName" -}}
+{{- default (printf "%s-triggers" ((include "static-site.fullname" .) | trunc 54 | trimSuffix "-")) .Values.triggers.serviceAccount.name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "static-site.workflowTemplateName" -}}
+{{- define "static-site.pipelineName" -}}
 {{- printf "%s-build" ((include "static-site.fullname" .) | trunc 57 | trimSuffix "-") }}
 {{- end }}
 
-{{- define "static-site.eventSourceName" -}}
+{{- define "static-site.eventListenerName" -}}
 {{- printf "%s-github" ((include "static-site.fullname" .) | trunc 56 | trimSuffix "-") }}
 {{- end }}
 
-{{- define "static-site.eventsNamespace" -}}
-{{- default .Release.Namespace .Values.events.namespace }}
+{{- define "static-site.eventListenerServiceName" -}}
+{{- printf "el-%s" (include "static-site.eventListenerName" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "static-site.eventsSecretsRoleName" -}}
-{{- printf "%s-events-secrets" ((include "static-site.fullname" .) | trunc 48 | trimSuffix "-") }}
+{{- define "static-site.triggersNamespace" -}}
+{{- default .Release.Namespace .Values.triggers.namespace }}
 {{- end }}
 
-{{- define "static-site.eventsSubmitRoleName" -}}
-{{- printf "%s-events-submit" ((include "static-site.fullname" .) | trunc 49 | trimSuffix "-") }}
+{{- define "static-site.triggersRoleName" -}}
+{{- printf "%s-triggers" ((include "static-site.fullname" .) | trunc 41 | trimSuffix "-") }}
 {{- end }}
 
-{{- define "static-site.gitSyncInitContainer" -}}
+{{- define "static-site.gitSyncStep" -}}
 - name: git-sync
-  image: "{{ .Values.workflow.git.image.repository }}:{{ .Values.workflow.git.image.tag }}"
-  imagePullPolicy: {{ .Values.workflow.git.image.pullPolicy }}
+  image: "{{ .Values.pipeline.git.image.repository }}:{{ .Values.pipeline.git.image.tag }}"
+  imagePullPolicy: {{ .Values.pipeline.git.image.pullPolicy }}
   args:
     - {{ printf "--repo=%s" .Values.site.repository | quote }}
-    - {{ "--ref={{workflow.parameters.revision}}" | quote }}
+    - {{ "--ref=$(params.revision)" | quote }}
     - --root=/workspace
     - --link=source
     - --one-time=true
-    - --depth={{ .Values.workflow.git.depth }}
-    - --submodules={{ ternary "off" "recursive" .Values.workflow.git.disableSubmodules }}
+    - --depth={{ .Values.pipeline.git.depth }}
+    - --submodules={{ ternary "off" "recursive" .Values.pipeline.git.disableSubmodules }}
     - --git-gc=off
     {{- if eq .Values.gitCredentials.authentication "ssh" }}
     - --ssh-key-file=/etc/git-secret/ssh

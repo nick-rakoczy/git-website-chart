@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["site", "gitCredentials"],
+  "required": ["site", "persistence", "pipeline", "triggers", "gitCredentials"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1 },
     "site": {
@@ -20,15 +20,7 @@
         "required": ["name", "image", "workingDirectory", "command", "outputDirectory", "path"],
         "properties": {
           "name": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-          "image": {
-            "type": "object",
-            "required": ["repository", "tag", "pullPolicy"],
-            "properties": {
-              "repository": { "type": "string", "minLength": 1 },
-              "tag": { "type": "string", "minLength": 1 },
-              "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
-            }
-          },
+          "image": { "$ref": "#/definitions/image" },
           "workingDirectory": { "type": "string", "minLength": 1 },
           "command": { "type": "string", "minLength": 1 },
           "outputDirectory": { "type": "string", "minLength": 1 },
@@ -50,13 +42,13 @@
         "retain": { "type": "boolean" }
       }
     },
-    "workflow": {
+    "pipeline": {
       "type": "object",
-      "required": ["serviceAccount", "git", "publishImage"],
+      "required": ["serviceAccount", "nodeSelector", "tolerations", "affinity", "podSecurityContext", "git", "publishImage", "timeouts"],
       "properties": {
         "serviceAccount": {
           "type": "object",
-          "required": ["create", "name"],
+          "required": ["create", "name", "annotations"],
           "properties": {
             "create": { "type": "boolean" },
             "name": { "type": "string" },
@@ -67,35 +59,25 @@
         "tolerations": { "type": "array" },
         "affinity": { "type": "object" },
         "podSecurityContext": { "type": "object" },
-        "mutexName": { "type": "string" },
         "git": {
           "type": "object",
           "required": ["image", "depth", "disableSubmodules"],
           "properties": {
-            "image": {
-              "type": "object",
-              "required": ["repository", "tag", "pullPolicy"],
-              "properties": {
-                "repository": { "type": "string", "minLength": 1 },
-                "tag": { "type": "string", "minLength": 1 },
-                "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
-              }
-            },
+            "image": { "$ref": "#/definitions/image" },
             "depth": { "type": "integer", "minimum": 0 },
             "disableSubmodules": { "type": "boolean" }
           }
         },
-        "publishImage": {
+        "publishImage": { "$ref": "#/definitions/image" },
+        "timeouts": {
           "type": "object",
-          "required": ["repository", "tag", "pullPolicy"],
+          "required": ["pipeline", "tasks", "finally"],
           "properties": {
-            "repository": { "type": "string", "minLength": 1 },
-            "tag": { "type": "string", "minLength": 1 },
-            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+            "pipeline": { "type": "string", "minLength": 2 },
+            "tasks": { "type": "string", "minLength": 2 },
+            "finally": { "type": "string", "minLength": 2 }
           }
-        },
-        "ttlStrategy": { "type": "object" },
-        "podGC": { "type": "object" }
+        }
       },
       "allOf": [
         {
@@ -104,16 +86,15 @@
         }
       ]
     },
-    "events": {
+    "triggers": {
       "type": "object",
-      "required": ["enabled", "namespace", "eventBusName", "serviceAccount", "github"],
+      "required": ["enabled", "namespace", "serviceAccount", "github"],
       "properties": {
         "enabled": { "type": "boolean" },
         "namespace": { "type": "string" },
-        "eventBusName": { "type": "string", "minLength": 1 },
         "serviceAccount": {
           "type": "object",
-          "required": ["create", "name"],
+          "required": ["create", "name", "annotations"],
           "properties": {
             "create": { "type": "boolean" },
             "name": { "type": "string" },
@@ -122,22 +103,10 @@
         },
         "github": {
           "type": "object",
-          "required": ["repositories", "branch", "endpoint", "port", "webhookSecret", "service", "ingress"],
+          "required": ["branch", "endpoint", "webhookSecret", "ingress"],
           "properties": {
-            "repositories": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": ["owner", "names"],
-                "properties": {
-                  "owner": { "type": "string", "minLength": 1 },
-                  "names": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
-                }
-              }
-            },
             "branch": { "type": "string", "minLength": 1 },
             "endpoint": { "type": "string", "pattern": "^/" },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "webhookSecret": {
               "type": "object",
               "required": ["name", "key"],
@@ -146,24 +115,23 @@
                 "key": { "type": "string", "minLength": 1 }
               }
             },
-            "service": {
-              "type": "object",
-              "required": ["type"],
-              "properties": {
-                "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
-                "annotations": { "type": "object" }
-              }
-            },
             "ingress": {
               "type": "object",
-              "required": ["enabled", "hostname", "pathType", "tls"],
+              "required": ["enabled", "className", "annotations", "hostname", "pathType", "tls"],
               "properties": {
                 "enabled": { "type": "boolean" },
                 "className": { "type": "string" },
                 "annotations": { "type": "object" },
                 "hostname": { "type": "string" },
                 "pathType": { "enum": ["Exact", "Prefix", "ImplementationSpecific"] },
-                "tls": { "type": "object" }
+                "tls": {
+                  "type": "object",
+                  "required": ["enabled", "secretName"],
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "secretName": { "type": "string" }
+                  }
+                }
               }
             }
           }
@@ -180,17 +148,12 @@
             "properties": {
               "github": {
                 "properties": {
-                  "repositories": { "minItems": 1 },
-                  "webhookSecret": {
-                    "properties": { "name": { "type": "string", "minLength": 1 } }
-                  },
+                  "webhookSecret": { "properties": { "name": { "minLength": 1 } } },
                   "ingress": {
                     "allOf": [
                       {
                         "if": { "properties": { "enabled": { "const": true } } },
-                        "then": {
-                          "properties": { "hostname": { "type": "string", "minLength": 1 } }
-                        }
+                        "then": { "properties": { "hostname": { "minLength": 1 } } }
                       }
                     ]
                   }
@@ -220,7 +183,7 @@
         },
         "onePassword": {
           "type": "object",
-          "required": ["enabled", "itemPath"],
+          "required": ["enabled", "itemPath", "annotations"],
           "properties": {
             "enabled": { "type": "boolean" },
             "itemPath": { "type": "string" },
@@ -230,20 +193,8 @@
       },
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "onePassword": {
-                "properties": { "enabled": { "const": true } }
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "onePassword": {
-                "properties": { "itemPath": { "minLength": 1 } }
-              }
-            }
-          }
+          "if": { "properties": { "onePassword": { "properties": { "enabled": { "const": true } } } } },
+          "then": { "properties": { "onePassword": { "properties": { "itemPath": { "minLength": 1 } } } } }
         }
       ]
     },
@@ -252,6 +203,17 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "hostname": { "type": "string" }
+      }
+    }
+  },
+  "definitions": {
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "minLength": 1 },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
       }
     }
   }

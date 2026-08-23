@@ -1,0 +1,93 @@
+{{- if .Values.triggers.enabled }}
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: {{ include "static-site.eventListenerName" . }}
+  namespace: {{ include "static-site.triggersNamespace" . }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ include "static-site.triggersServiceAccountName" . }}
+  triggers:
+    - name: github-push
+      interceptors:
+        - ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: {{ required "triggers.github.webhookSecret.name is required when triggers are enabled" .Values.triggers.github.webhookSecret.name }}
+                secretKey: {{ .Values.triggers.github.webhookSecret.key }}
+            - name: eventTypes
+              value:
+                - push
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: {{ printf "body.ref == 'refs/heads/%s'" .Values.triggers.github.branch | quote }}
+      bindings:
+        - name: revision
+          value: $(body.after)
+      template:
+        spec:
+          params:
+            - name: revision
+              description: Immutable commit SHA from the GitHub push payload.
+          resourcetemplates:
+            - apiVersion: tekton.dev/v1
+              kind: PipelineRun
+              metadata:
+                generateName: {{ printf "%s-" (include "static-site.pipelineName" .) | trunc 63 | trimSuffix "-" }}-
+                namespace: {{ .Release.Namespace }}
+                labels:
+                  {{- include "static-site.selectorLabels" . | nindent 18 }}
+              spec:
+                pipelineRef:
+                  name: {{ include "static-site.pipelineName" . }}
+                params:
+                  - name: revision
+                    value: $(tt.params.revision)
+                taskRunTemplate:
+                  serviceAccountName: {{ include "static-site.pipelineServiceAccountName" . }}
+                  podTemplate:
+                    securityContext:
+                      {{- toYaml .Values.pipeline.podSecurityContext | nindent 22 }}
+                    {{- with .Values.imagePullSecrets }}
+                    imagePullSecrets:
+                      {{- toYaml . | nindent 22 }}
+                    {{- end }}
+                    {{- if .Values.pipeline.nodeSelector }}
+                    nodeSelector:
+                      {{- toYaml .Values.pipeline.nodeSelector | nindent 22 }}
+                    {{- else }}
+                    {{- with .Values.nodeSelector }}
+                    nodeSelector:
+                      {{- toYaml . | nindent 22 }}
+                    {{- end }}
+                    {{- end }}
+                    {{- if .Values.pipeline.affinity }}
+                    affinity:
+                      {{- toYaml .Values.pipeline.affinity | nindent 22 }}
+                    {{- else }}
+                    {{- with .Values.affinity }}
+                    affinity:
+                      {{- toYaml . | nindent 22 }}
+                    {{- end }}
+                    {{- end }}
+                    {{- if .Values.pipeline.tolerations }}
+                    tolerations:
+                      {{- toYaml .Values.pipeline.tolerations | nindent 22 }}
+                    {{- else }}
+                    {{- with .Values.tolerations }}
+                    tolerations:
+                      {{- toYaml . | nindent 22 }}
+                    {{- end }}
+                    {{- end }}
+                workspaces:
+                  - name: site
+                    persistentVolumeClaim:
+                      claimName: {{ include "static-site.pvcName" . }}
+                timeouts:
+                  {{- toYaml .Values.pipeline.timeouts | nindent 18 }}
+{{- end }}

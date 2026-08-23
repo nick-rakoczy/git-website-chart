@@ -1,25 +1,26 @@
 # Static site Helm chart
 
-This chart builds a private Git repository with Argo Workflows and serves the
+This chart builds a private Git repository with Tekton Pipelines and serves the
 published static files with nginx. Build tasks may use different images and run
-in parallel. A successful workflow assembles their outputs on a persistent
+in parallel. A successful PipelineRun assembles their outputs on a persistent
 volume and atomically switches nginx to the new release.
 
 Repositories without a build step are also supported: leave `build` empty and
-the workflow publishes the checked-out repository contents directly.
+the Pipeline publishes the checked-out repository contents directly.
 
 ## Prerequisites
 
 - Kubernetes with a filesystem-backed `ReadWriteOnce` storage class
-- Argo Workflows watching the release namespace
-- Argo Events and an EventBus when `events.enabled` is true
-- A node on which nginx and every Workflow pod can be scheduled together
+- Tekton Pipelines
+- Tekton Triggers and its core interceptors when `triggers.enabled` is true
+- A node on which nginx and every TaskRun pod can be scheduled together
 - A GitHub App with read-only Contents access, or a read-only SSH deploy key
 - A Kubernetes Secret containing the selected authentication credentials
 
 `ReadWriteOnce` permits the claim to be mounted by multiple pods on one node.
-Set the same node selector for nginx and the Workflow. By default,
-`workflow.nodeSelector` inherits the chart's top-level `nodeSelector`.
+Set the same node selector for nginx and PipelineRuns. Trigger-created
+PipelineRuns use `pipeline.nodeSelector`, falling back to the chart's top-level
+`nodeSelector`.
 
 ## Git credentials
 
@@ -63,10 +64,10 @@ gitCredentials:
     itemPath: vaults/Kubernetes/items/static-sites-git
 ```
 
-Each build pod runs `git-sync` once before the build. It uses the App private
-key to mint a short-lived installation token, just as the previous sidecar did.
-To use an existing Secret, leave `onePassword.enabled: false` and set
-`gitCredentials.secretName`.
+Each build TaskRun executes `git-sync` before its build step. `git-sync` uses
+the App private key to mint a short-lived installation token. The credential
+volume is mounted only into that step. To use an existing Secret, leave
+`onePassword.enabled: false` and set `gitCredentials.secretName`.
 
 Override the Secret field names when necessary:
 
@@ -110,14 +111,14 @@ gitCredentials:
 ```
 
 Store real credentials in 1Password; do not commit them. Obtain and verify
-GitHub's current host keys from GitHub's documentation rather than copying the
-placeholder above.
+GitHub's current host keys rather than copying the placeholder above.
 
 ## Configure builds
 
-Each build item has its own container image. `workingDirectory` is relative to
-the repository root, `outputDirectory` is relative to that working directory,
-and `path` is relative to the hosted site root.
+Each build item becomes an independent Tekton PipelineTask with its own
+checkout. `workingDirectory` is relative to the repository root,
+`outputDirectory` is relative to that working directory, and `path` is relative
+to the hosted site root.
 
 ```yaml
 build:
@@ -143,11 +144,9 @@ build:
 ```
 
 The example publishes `apps/web/dist` at `/` and `apps/docs/build` at `/docs`.
-Build tasks run in parallel against separate checkouts of the same revision.
-After all tasks succeed, a publication task merges outputs in list order. A
-failed workflow leaves the currently served release unchanged.
-
-Build images must provide `/bin/sh`, `cp`, and the tools used by their command.
+Build TaskRuns execute in parallel. The publish Task runs only after every build
+succeeds, and the `finally` cleanup Task runs after success or failure. Build
+images must provide `/bin/sh`, `cp`, and the tools used by their command.
 
 ## Persistent releases and node placement
 
@@ -159,17 +158,21 @@ persistence:
   existingClaim: example-com-site
 ```
 
-Pin nginx and Workflow pods to the same node:
+Pin nginx and trigger-created PipelineRuns to the same node:
 
 ```yaml
 nodeSelector:
   kubernetes.io/hostname: worker-1
 ```
 
-You can instead set `workflow.nodeSelector` separately, but it must resolve to
-the same node. Workflow-level mutex synchronization prevents two revisions from
-publishing concurrently. The volume retains the current and immediately
-previous releases.
+You can set `pipeline.nodeSelector` separately, but it must resolve to the same
+node as nginx. Every PipelineTask binds the same `site` Workspace, allowing
+Tekton's Affinity Assistant to co-schedule TaskRuns that share the RWO claim.
+
+The publish step takes an advisory lock on the shared filesystem. Concurrent
+PipelineRuns may build in parallel, but publication and release pruning are
+serialized. The lock is automatically released if the process exits. The
+volume retains the current and immediately previous successful releases.
 
 ## Install and publish manually
 
@@ -181,41 +184,32 @@ helm upgrade --install example-com . \
 ```
 
 The nginx readiness probe remains false until the first successful publication.
-Submit the default revision from `site.revision`:
+Start the default revision:
 
 ```sh
-argo submit --from workflowtemplate/example-com-static-site-build \
+tkn pipeline start example-com-static-site-build \
   --namespace example-com \
-  --watch
+  --param revision=main \
+  --workspace name=site,claimName=example-com-static-site-site \
+  --serviceaccount example-com-static-site-pipeline \
+  --showlog
 ```
 
-Or publish an exact commit:
+Use the generated names shown by `helm install` notes when the release or chart
+name differs. For manual PipelineRuns that require custom scheduling, supply a
+Tekton pod template equivalent to `pipeline.nodeSelector`, `affinity`, and
+`tolerations`.
 
-```sh
-argo submit --from workflowtemplate/example-com-static-site-build \
-  --namespace example-com \
-  --parameter revision=<commit-sha> \
-  --watch
-```
+## GitHub push triggers
 
-Use the actual generated template name shown by `helm install` notes when the
-release or chart name differs.
-
-## GitHub push events
-
-Set `events.enabled` to render a GitHub EventSource, Sensor, webhook Service,
-minimal RBAC, and optional Ingress:
+Set `triggers.enabled` to render a Tekton EventListener, minimal RBAC, and an
+optional Ingress:
 
 ```yaml
-events:
+triggers:
   enabled: true
-  # Set this when the EventBus is not in the site's namespace.
-  namespace: argo-events
+  namespace: tekton-triggers
   github:
-    repositories:
-      - owner: your-org
-        names:
-          - example.com
     branch: main
     webhookSecret:
       name: example-com-github-webhook
@@ -225,31 +219,31 @@ events:
       hostname: hooks.example.com
 ```
 
-The EventSource and Sensor are created in `events.namespace`, which defaults to
-the Helm release namespace. The named EventBus and GitHub webhook Secret must
-exist in that namespace. The Sensor receives narrowly scoped permission to
-create the resulting Workflow in the site's release namespace.
-
-Create `example-com-github-webhook` with a strong random `secret` value in the
-events namespace, then configure the GitHub repository webhook with the same
-secret, content type `application/json`, the `push` event, and this payload URL:
+The namespace must already exist and contain the webhook Secret. Create it with
+a strong random `secret` value, then configure the GitHub repository webhook
+with the same secret, content type `application/json`, the `push` event, and:
 
 ```text
 https://hooks.example.com/push
 ```
 
-The Sensor accepts pushes only for `events.github.branch` and passes the
-payload's immutable `after` commit SHA to the WorkflowTemplate. The EventSource
-and Sensor can run on any node because they do not mount the site claim.
+The GitHub interceptor validates the webhook HMAC and accepts only push events.
+The CEL interceptor accepts only `triggers.github.branch`. The binding passes
+the payload's immutable `after` commit SHA into a PipelineRun. The EventListener
+receives permission only to read its webhook Secret and create PipelineRuns in
+the site's release namespace.
+
+GitHub App credentials are used only for repository checkout. Tekton Triggers
+does not need the App private key because the webhook is configured manually.
 
 ## Deployment behavior
 
 nginx serves `/srv/site/current`, an atomic symlink maintained by successful
-workflows. Site updates do not restart nginx. The chart creates narrowly scoped
-service accounts: Workflow pods may report `workflowtaskresults`, while the
-Sensor may read its webhook secret and create Workflow resources.
+PipelineRuns. Site updates do not restart nginx. The Pipeline service account
+does not receive Kubernetes API permissions and does not automount a token; the
+Trigger service account has only the narrowly scoped access described above.
 
 The default nginx security context runs as UID/GID 101. If a custom nginx image
-uses another account, update `nginx.securityContext` and the nginx
-`podSecurityContext`. Keep the Workflow `fsGroup` compatible with nginx so
-published files remain readable.
+uses another account, update `nginx.securityContext` and `podSecurityContext`.
+Keep `pipeline.podSecurityContext.fsGroup` compatible with nginx so published
+files remain readable.

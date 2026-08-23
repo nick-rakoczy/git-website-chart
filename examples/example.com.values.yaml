@@ -17,14 +17,10 @@ build:
 nodeSelector:
   kubernetes.io/hostname: worker-1
 
-events:
+triggers:
   enabled: true
-  namespace: argo-events
+  namespace: tekton-triggers
   github:
-    repositories:
-      - owner: your-org
-        names:
-          - example.com
     branch: main
     webhookSecret:
       name: example-com-github-webhook

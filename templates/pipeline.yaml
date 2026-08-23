@@ -1,0 +1,226 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: {{ include "static-site.pipelineName" . }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+spec:
+  params:
+    - name: revision
+      type: string
+      default: {{ .Values.site.revision | quote }}
+  workspaces:
+    - name: site
+      description: Persistent static-site releases shared with nginx.
+  tasks:
+    {{- if .Values.build }}
+    {{- range $index, $stage := .Values.build }}
+    - name: build-{{ $index }}
+      params:
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: site
+          workspace: site
+      taskSpec:
+        params:
+          - name: revision
+            type: string
+        workspaces:
+          - name: site
+        volumes:
+          - name: source
+            emptyDir: {}
+          - name: git-credentials
+            secret:
+              secretName: {{ include "static-site.gitSecretName" $ }}
+              defaultMode: 0440
+              items:
+                {{- if eq $.Values.gitCredentials.authentication "ssh" }}
+                - key: {{ $.Values.gitCredentials.privateKeyKey }}
+                  path: ssh
+                - key: {{ $.Values.gitCredentials.knownHostsKey }}
+                  path: known_hosts
+                {{- else if eq $.Values.gitCredentials.authentication "githubApp" }}
+                - key: {{ $.Values.gitCredentials.githubApp.privateKeyKey }}
+                  path: private-key.pem
+                {{- end }}
+        steps:
+          {{- include "static-site.gitSyncStep" $ | nindent 10 }}
+          - name: build
+            image: "{{ $stage.image.repository }}:{{ $stage.image.tag }}"
+            imagePullPolicy: {{ $stage.image.pullPolicy }}
+            command:
+              - /bin/sh
+              - -ec
+            args:
+              - |
+                set -eu
+                stage_name={{ $stage.name | quote }}
+                working_directory={{ $stage.workingDirectory | quote }}
+                output_directory={{ $stage.outputDirectory | quote }}
+                for relative_path in "$working_directory" "$output_directory"; do
+                  case "$relative_path" in
+                    ""|/*|..|*/..|../*|*/../*) echo "invalid path in build stage $stage_name: $relative_path" >&2; exit 1 ;;
+                  esac
+                done
+                cd "/workspace/source/$working_directory"
+                /bin/sh -ec {{ $stage.command | quote }}
+                output_path="/workspace/source/$working_directory/$output_directory"
+                test -d "$output_path"
+                target="$(workspaces.site.path)/.staging/$(context.pipelineRun.uid)/stage-{{ $index }}"
+                rm -rf "$target"
+                mkdir -p "$target"
+                cp -R "$output_path/." "$target/"
+            volumeMounts:
+              - name: source
+                mountPath: /workspace
+            {{- with $stage.resources }}
+            computeResources:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            {{- with $stage.securityContext }}
+            securityContext:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+    {{- end }}
+    {{- else }}
+    - name: copy-source
+      params:
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: site
+          workspace: site
+      taskSpec:
+        params:
+          - name: revision
+            type: string
+        workspaces:
+          - name: site
+        volumes:
+          - name: source
+            emptyDir: {}
+          - name: git-credentials
+            secret:
+              secretName: {{ include "static-site.gitSecretName" . }}
+              defaultMode: 0440
+              items:
+                {{- if eq .Values.gitCredentials.authentication "ssh" }}
+                - key: {{ .Values.gitCredentials.privateKeyKey }}
+                  path: ssh
+                - key: {{ .Values.gitCredentials.knownHostsKey }}
+                  path: known_hosts
+                {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
+                - key: {{ .Values.gitCredentials.githubApp.privateKeyKey }}
+                  path: private-key.pem
+                {{- end }}
+        steps:
+          {{- include "static-site.gitSyncStep" . | nindent 10 }}
+          - name: copy-source
+            image: "{{ .Values.pipeline.publishImage.repository }}:{{ .Values.pipeline.publishImage.tag }}"
+            imagePullPolicy: {{ .Values.pipeline.publishImage.pullPolicy }}
+            script: |
+              #!/bin/sh
+              set -eu
+              target="$(workspaces.site.path)/.staging/$(context.pipelineRun.uid)/stage-0"
+              rm -rf "$target"
+              mkdir -p "$target"
+              cp -R /workspace/source/. "$target/"
+              rm -rf "$target/.git"
+            volumeMounts:
+              - name: source
+                mountPath: /workspace
+    {{- end }}
+
+    - name: publish
+      runAfter:
+        {{- if .Values.build }}
+        {{- range $index, $_ := .Values.build }}
+        - build-{{ $index }}
+        {{- end }}
+        {{- else }}
+        - copy-source
+        {{- end }}
+      params:
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: site
+          workspace: site
+      taskSpec:
+        params:
+          - name: revision
+            type: string
+        workspaces:
+          - name: site
+        steps:
+          - name: publish
+            image: "{{ .Values.pipeline.publishImage.repository }}:{{ .Values.pipeline.publishImage.tag }}"
+            imagePullPolicy: {{ .Values.pipeline.publishImage.pullPolicy }}
+            script: |
+              #!/bin/sh
+              set -eu
+              site="$(workspaces.site.path)"
+              release_id="$(context.pipelineRun.uid)"
+              revision="$(params.revision)"
+
+              # Serialize publication and pruning across concurrent PipelineRuns.
+              exec 9>"$site/.publish.lock"
+              flock -x 9
+
+              staging_root="$site/.staging/$release_id"
+              release_tmp="$site/.release-$release_id"
+              release_dir="$site/releases/$release_id"
+              next_link="$site/.current-$release_id"
+              current="$(readlink "$site/current" 2>/dev/null || true)"
+              previous_release="${current#releases/}"
+
+              rm -rf "$release_tmp" "$release_dir"
+              mkdir -p "$release_tmp" "$site/releases"
+              {{- if .Values.build }}
+              {{- range $index, $stage := .Values.build }}
+              publish_path={{ $stage.path | quote }}
+              case "$publish_path" in
+                ""|/*|..|*/..|../*|*/../*) echo "invalid publish path: $publish_path" >&2; exit 1 ;;
+              esac
+              mkdir -p "$release_tmp/$publish_path"
+              cp -R "$staging_root/stage-{{ $index }}/." "$release_tmp/$publish_path/"
+              {{- end }}
+              {{- else }}
+              cp -R "$staging_root/stage-0/." "$release_tmp/"
+              {{- end }}
+
+              mv "$release_tmp" "$release_dir"
+              printf '%s\n' "$revision" > "$site/.revision-$release_id"
+              ln -s "releases/$release_id" "$next_link"
+              mv -Tf "$next_link" "$site/current"
+              rm -rf "$staging_root"
+
+              find "$site/releases" -mindepth 1 -maxdepth 1 \
+                ! -name "$release_id" ! -name "$previous_release" \
+                -exec rm -rf {} +
+              find "$site" -maxdepth 1 -type f -name '.revision-*' \
+                ! -name ".revision-$release_id" ! -name ".revision-$previous_release" \
+                -delete
+              echo "published revision $revision as release $release_id"
+
+  finally:
+    - name: cleanup
+      workspaces:
+        - name: site
+          workspace: site
+      taskSpec:
+        workspaces:
+          - name: site
+        steps:
+          - name: cleanup
+            image: "{{ .Values.pipeline.publishImage.repository }}:{{ .Values.pipeline.publishImage.tag }}"
+            imagePullPolicy: {{ .Values.pipeline.publishImage.pullPolicy }}
+            script: |
+              #!/bin/sh
+              set -eu
+              site="$(workspaces.site.path)"
+              release_id="$(context.pipelineRun.uid)"
+              rm -rf "$site/.staging/$release_id" "$site/.release-$release_id"
+              rm -f "$site/.current-$release_id"
