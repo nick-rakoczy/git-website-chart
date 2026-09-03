@@ -15,9 +15,10 @@ into the nginx site root.
 - A Kubernetes Secret containing the selected authentication credentials
 
 The chart can create a 1Password `OnePasswordItem`, or consume an existing
-Secret. A chart-provisioned Secret is named `<release-fullname>-git`, so each
-Helm release gets its own credential Secret. Set `gitCredentials.secretName`
-only when consuming a Secret created outside this chart.
+Secret. A chart-provisioned Secret is named `<Helm release name>-git`. Helm
+release names are unique within a namespace, so two releases get different
+generated Secrets. Set `gitCredentials.secretName` only when consuming a Secret
+created outside this chart.
 
 ## Configure builds
 

@@ -57,7 +57,7 @@ gitCredentials:
   # Authentication mode: "ssh" or "githubApp".
   authentication: ssh
   # Name of an existing Secret. Required when onePassword.enabled is false and
-  # ignored when the chart provisions its own release-specific Secret.
+  # ignored when the chart provisions its own <Helm release name>-git Secret.
   secretName: ""
   # 1Password SSH Key items expose "private key" as "private-key".
   privateKeyKey: private-key
@@ -68,7 +68,7 @@ gitCredentials:
     installationIdKey: installation_id
     privateKeyKey: private_key
   onePassword:
-    # Create a OnePasswordItem named <release fullname>-git.
+    # Create a OnePasswordItem named <Helm release name>-git.
     enabled: false
     itemPath: ""
     annotations: {}
