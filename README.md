@@ -1,27 +1,71 @@
 # Static site Helm chart
 
-This chart serves a private Git repository with nginx. A `git-sync` sidecar
-polls a branch, publishes each checkout through an atomic symlink, and shares
-the checkout with nginx through a read-only volume mount.
+This chart clones and builds a private Git repository in Kubernetes init
+containers, then serves the result with nginx. It needs no workflow controller,
+event controller, persistent volume, or build service account.
+
+Leave `build` empty to serve the repository contents directly. When builds are
+configured, each item gets its own copy of the checkout and publishes its output
+into the nginx site root.
 
 ## Prerequisites
 
 - Kubernetes 1.34+
-- Argo CD (optional, but expected for this repository layout)
-- A GitHub App with read-only Contents access, or a read-only GitHub SSH
-  deploy key
+- A GitHub App with read-only Contents access, or a read-only GitHub SSH deploy key
 - A Kubernetes Secret containing the selected authentication credentials
 
 The chart can create a 1Password `OnePasswordItem`, or consume an existing
 Secret.
 
-### GitHub App authentication
+## Configure builds
 
-GitHub App authentication is recommended when multiple sites share access to
-private repositories. Install the App on the required repositories with
-read-only Contents access. The 1Password item must contain fields named
-`application_id`, `installation_id`, and `private_key`; the resulting Secret
-must look like:
+Build items run sequentially because Kubernetes init containers are ordered.
+`workingDirectory` is relative to the repository root, `outputDirectory` is
+relative to that working directory, and `path` is relative to the hosted site
+root.
+
+```yaml
+build:
+  - name: main
+    image:
+      repository: node
+      tag: 22-alpine
+      pullPolicy: IfNotPresent
+    workingDirectory: apps/web
+    command: npm ci && npm run build
+    outputDirectory: dist
+    path: .
+
+  - name: docs
+    image:
+      repository: node
+      tag: 20-alpine
+      pullPolicy: IfNotPresent
+    workingDirectory: apps/docs
+    command: npm ci && npm run build
+    outputDirectory: build
+    path: docs
+```
+
+This publishes `apps/web/dist` at `/` and `apps/docs/build` at `/docs`. Each
+build starts from a separate copy of the same checkout, so one build cannot
+modify another build's source. Outputs are copied in list order. Later items can
+replace files written by earlier items.
+
+Build images must provide `/bin/sh`, `cp`, and the tools used by their command.
+The pod stays in its init phase if a clone or build fails, so nginx never serves
+a partial result.
+
+To serve repository files without building them, keep the default:
+
+```yaml
+build: []
+```
+
+## GitHub App authentication
+
+Install the App on the required repositories with read-only Contents access.
+The Secret must contain the App and installation IDs plus its private key:
 
 ```yaml
 apiVersion: v1
@@ -38,7 +82,7 @@ stringData:
     -----END RSA PRIVATE KEY-----
 ```
 
-Configure the chart with an HTTPS repository URL:
+Use an HTTPS repository URL:
 
 ```yaml
 site:
@@ -47,29 +91,15 @@ site:
 gitCredentials:
   authentication: githubApp
   secretName: static-sites-git
-  onePassword:
-    enabled: true
-    itemPath: vaults/Kubernetes/items/static-sites-git
 ```
 
-`git-sync` uses the App private key to mint and refresh short-lived
-installation tokens automatically. To use an existing Secret, leave
-`onePassword.enabled: false` and set `gitCredentials.secretName`.
+The one-time `git-sync` init container uses the App private key to mint an
+installation token. Field names can be overridden under
+`gitCredentials.githubApp`.
 
-Override the Secret field names when necessary:
+## SSH authentication
 
-```yaml
-gitCredentials:
-  githubApp:
-    applicationIdKey: application_id
-    installationIdKey: installation_id
-    privateKeyKey: private_key
-```
-
-### SSH authentication
-
-SSH remains the default authentication mode for backward compatibility. Its
-Secret must look like:
+SSH remains the default authentication mode. Its Secret must look like:
 
 ```yaml
 apiVersion: v1
@@ -86,34 +116,26 @@ stringData:
     github.com ssh-ed25519 <verified-github-host-key>
 ```
 
-Store the real values in 1Password. Do not commit the private key. Obtain and
-verify GitHub's current host keys from GitHub's documentation rather than
-copying the placeholder above.
+Obtain and verify GitHub's current host keys from GitHub's documentation. Do
+not copy the placeholder above.
 
-Use a 1Password **SSH Key** item and add a custom text field named
-`known-hosts`. The operator normalizes the built-in `private key` field to the
-Secret key `private-key`; `known-hosts` keeps its name. Enable provisioning
-directly from the chart with:
+```yaml
+site:
+  repository: git@github.com:your-org/example.com.git
+
+gitCredentials:
+  authentication: ssh
+  secretName: example-com-git
+```
+
+To provision either credential type through 1Password, enable the bundled
+`OnePasswordItem`:
 
 ```yaml
 gitCredentials:
-  authentication: ssh
-  # Optional; defaults to <release fullname>-git.
-  secretName: example-com-git
   onePassword:
     enabled: true
     itemPath: vaults/Kubernetes/items/example-com-git
-```
-
-The operator creates a Secret with the same name as the generated
-`OnePasswordItem`.
-
-If an existing Secret uses different key names, override them explicitly:
-
-```yaml
-gitCredentials:
-  privateKeyKey: private-key
-  knownHostsKey: known-hosts
 ```
 
 ## Install or render
@@ -132,16 +154,23 @@ helm template example-com . \
 ```
 
 For Argo CD, copy `examples/application.yaml` and adjust its repository,
-namespace, and values file.
+namespace, and values file. Argo CD is only acting as the Helm reconciler here.
+The chart does not use Argo Workflows or Argo Events.
 
 ## Deployment behavior
 
-Each pod independently polls the configured branch. A push does not require an
-Argo CD sync or a pod restart. During startup the nginx readiness probe fails
-until the configured index file is present. Set `replicaCount` above one when
-you want pod-restart availability as well as atomic in-pod content updates.
+The clone and build happen once per pod startup. Use an immutable commit SHA in
+`site.revision` and update it through Helm or GitOps to publish a new version.
+Changing `site.revision`, a build command, or a build image changes the pod
+template and starts a rolling update.
 
-The default nginx security context runs as UID/GID 101, matching the official
-nginx Alpine image. If a custom nginx image uses a different non-root account,
-override `nginx.securityContext.runAsUser`, `runAsGroup`, and the pod
-`fsGroup` to match it.
+A branch name such as `main` resolves only when Kubernetes creates a new pod.
+Pushing to that branch does not change the Deployment, so it does not trigger a
+build. Restart the Deployment or change a pod-template value if branch-based
+deployments are required.
+
+Each replica has its own `emptyDir` volumes and performs its own clone and
+build. The rolling update keeps the old pod available while the replacement
+builds. The default nginx security context runs as UID/GID 101. If a custom
+nginx image uses another account, update `nginx.securityContext` and
+`podSecurityContext` together.

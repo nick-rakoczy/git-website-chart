@@ -2,6 +2,17 @@ site:
   repository: https://github.com/your-org/example.com.git
   revision: main
 
+build:
+  - name: main
+    image:
+      repository: node
+      tag: 22-alpine
+      pullPolicy: IfNotPresent
+    workingDirectory: .
+    command: npm ci && npm run build
+    outputDirectory: dist
+    path: .
+
 gitCredentials:
   authentication: githubApp
   secretName: example-com-git

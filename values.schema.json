@@ -13,6 +13,59 @@
         "indexFile": { "type": "string", "minLength": 1 }
       }
     },
+    "build": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "image", "workingDirectory", "command", "outputDirectory", "path"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "image": {
+            "type": "object",
+            "required": ["repository", "tag", "pullPolicy"],
+            "properties": {
+              "repository": { "type": "string", "minLength": 1 },
+              "tag": { "type": "string", "minLength": 1 },
+              "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+            }
+          },
+          "workingDirectory": { "type": "string", "minLength": 1 },
+          "command": { "type": "string", "minLength": 1 },
+          "outputDirectory": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "resources": { "type": "object" },
+          "securityContext": { "type": "object" }
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "required": ["image", "depth", "disableSubmodules"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag", "pullPolicy"],
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1 },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "depth": { "type": "integer", "minimum": 0 },
+        "disableSubmodules": { "type": "boolean" },
+        "resources": { "type": "object" },
+        "securityContext": { "type": "object" }
+      }
+    },
+    "publishImage": {
+      "type": "object",
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "minLength": 1 },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
     "gitCredentials": {
       "type": "object",
       "required": ["authentication", "privateKeyKey", "knownHostsKey", "githubApp", "onePassword"],

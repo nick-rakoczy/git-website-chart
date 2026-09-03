@@ -34,6 +34,120 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: git-sync
+          image: "{{ .Values.git.image.repository }}:{{ .Values.git.image.tag }}"
+          imagePullPolicy: {{ .Values.git.image.pullPolicy }}
+          args:
+            - {{ printf "--repo=%s" .Values.site.repository | quote }}
+            - {{ printf "--ref=%s" .Values.site.revision | quote }}
+            - --root=/workspace
+            - --link=source
+            - --one-time=true
+            - --depth={{ .Values.git.depth }}
+            - --submodules={{ ternary "off" "recursive" .Values.git.disableSubmodules }}
+            - --git-gc=off
+            {{- if eq .Values.gitCredentials.authentication "ssh" }}
+            - --ssh-key-file=/etc/git-secret/ssh
+            - --ssh-known-hosts=true
+            - --ssh-known-hosts-file=/etc/git-secret/known_hosts
+            {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
+            - --github-app-private-key-file=/etc/git-secret/private-key.pem
+            {{- end }}
+          {{- if eq .Values.gitCredentials.authentication "githubApp" }}
+          env:
+            - name: GITSYNC_GITHUB_APP_APPLICATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "static-site.gitSecretName" . }}
+                  key: {{ .Values.gitCredentials.githubApp.applicationIdKey }}
+            - name: GITSYNC_GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "static-site.gitSecretName" . }}
+                  key: {{ .Values.gitCredentials.githubApp.installationIdKey }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.git.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.git.resources | nindent 12 }}
+          volumeMounts:
+            - name: source
+              mountPath: /workspace
+            - name: git-sync-tmp
+              mountPath: /tmp
+            - name: git-credentials
+              mountPath: /etc/git-secret
+              readOnly: true
+        {{- if .Values.build }}
+        - name: prepare-site
+          image: "{{ .Values.publishImage.repository }}:{{ .Values.publishImage.tag }}"
+          imagePullPolicy: {{ .Values.publishImage.pullPolicy }}
+          command: [/bin/sh, -ec]
+          args:
+            - rm -rf /site/* /site/.[!.]* /site/..?* 2>/dev/null || true
+          volumeMounts:
+            - name: site
+              mountPath: /site
+        {{- range $index, $stage := .Values.build }}
+        - name: build-{{ $index }}
+          image: "{{ $stage.image.repository }}:{{ $stage.image.tag }}"
+          imagePullPolicy: {{ $stage.image.pullPolicy }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              set -eu
+              stage_name={{ $stage.name | quote }}
+              working_directory={{ $stage.workingDirectory | quote }}
+              output_directory={{ $stage.outputDirectory | quote }}
+              publish_path={{ $stage.path | quote }}
+              for relative_path in "$working_directory" "$output_directory" "$publish_path"; do
+                case "$relative_path" in
+                  ""|/*|..|*/..|../*|*/../*) echo "invalid path in build stage $stage_name: $relative_path" >&2; exit 1 ;;
+                esac
+              done
+              build_root="/workspace/build-{{ $index }}"
+              rm -rf "$build_root"
+              mkdir -p "$build_root"
+              cp -R /workspace/source/. "$build_root/"
+              cd "$build_root/$working_directory"
+              /bin/sh -ec {{ $stage.command | quote }}
+              output_path="$build_root/$working_directory/$output_directory"
+              test -d "$output_path"
+              mkdir -p "/site/$publish_path"
+              cp -R "$output_path/." "/site/$publish_path/"
+          volumeMounts:
+            - name: source
+              mountPath: /workspace
+            - name: site
+              mountPath: /site
+          {{- with $stage.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $stage.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- else }}
+        - name: publish-source
+          image: "{{ .Values.publishImage.repository }}:{{ .Values.publishImage.tag }}"
+          imagePullPolicy: {{ .Values.publishImage.pullPolicy }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              set -eu
+              rm -rf /site/* /site/.[!.]* /site/..?* 2>/dev/null || true
+              cp -R /workspace/source/. /site/
+              rm -rf /site/.git
+          volumeMounts:
+            - name: source
+              mountPath: /workspace
+              readOnly: true
+            - name: site
+              mountPath: /site
+        {{- end }}
       containers:
         - name: nginx
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -68,66 +182,10 @@ spec:
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
               readOnly: true
-        - name: git-sync
-          image: "{{ .Values.gitSync.image.repository }}:{{ .Values.gitSync.image.tag }}"
-          imagePullPolicy: {{ .Values.gitSync.image.pullPolicy }}
-          args:
-            - --repo={{ .Values.site.repository }}
-            - --ref={{ .Values.site.revision }}
-            - --root={{ .Values.gitSync.root }}
-            - --link={{ .Values.gitSync.link }}
-            - --period={{ .Values.gitSync.period }}
-            - --depth={{ .Values.gitSync.depth }}
-            - --max-failures={{ .Values.gitSync.maxFailures }}
-            {{- if eq .Values.gitCredentials.authentication "ssh" }}
-            - --ssh-key-file=/etc/git-secret/ssh
-            - --ssh-known-hosts=true
-            - --ssh-known-hosts-file=/etc/git-secret/known_hosts
-            {{- else if eq .Values.gitCredentials.authentication "githubApp" }}
-            - --github-app-private-key-file=/etc/git-secret/private-key.pem
-            {{- end }}
-            - --http-bind=:2020
-          {{- if eq .Values.gitCredentials.authentication "githubApp" }}
-          env:
-            - name: GITSYNC_GITHUB_APP_APPLICATION_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "static-site.gitSecretName" . }}
-                  key: {{ .Values.gitCredentials.githubApp.applicationIdKey }}
-            - name: GITSYNC_GITHUB_APP_INSTALLATION_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "static-site.gitSecretName" . }}
-                  key: {{ .Values.gitCredentials.githubApp.installationIdKey }}
-          {{- end }}
-          securityContext:
-            {{- toYaml .Values.gitSync.securityContext | nindent 12 }}
-          ports:
-            - name: git-sync-http
-              containerPort: 2020
-          startupProbe:
-            httpGet:
-              path: /
-              port: git-sync-http
-            periodSeconds: 2
-            failureThreshold: 60
-          livenessProbe:
-            httpGet:
-              path: /
-              port: git-sync-http
-            periodSeconds: 10
-          resources:
-            {{- toYaml .Values.gitSync.resources | nindent 12 }}
-          volumeMounts:
-            - name: site
-              mountPath: {{ .Values.gitSync.root }}
-            - name: git-sync-tmp
-              mountPath: /tmp
-            - name: git-credentials
-              mountPath: /etc/git-secret
-              readOnly: true
       volumes:
         - name: site
+          emptyDir: {}
+        - name: source
           emptyDir: {}
         - name: nginx-tmp
           emptyDir: {}
@@ -135,7 +193,7 @@ spec:
           emptyDir: {}
         - name: nginx-config
           configMap:
-            name: {{ include "static-site.fullname" . }}-nginx
+            name: {{ include "static-site.nginxConfigName" . }}
         - name: git-credentials
           secret:
             secretName: {{ include "static-site.gitSecretName" . }}

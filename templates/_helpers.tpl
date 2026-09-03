@@ -23,5 +23,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "static-site.gitSecretName" -}}
-{{- default (printf "%s-git" (include "static-site.fullname" .)) .Values.gitCredentials.secretName | trunc 63 | trimSuffix "-" }}
+{{- default (printf "%s-git" ((include "static-site.fullname" .) | trunc 59 | trimSuffix "-")) .Values.gitCredentials.secretName | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "static-site.nginxConfigName" -}}
+{{- printf "%s-nginx" ((include "static-site.fullname" .) | trunc 57 | trimSuffix "-") }}
 {{- end }}

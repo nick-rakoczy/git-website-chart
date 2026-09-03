@@ -15,16 +15,26 @@ site:
   revision: main
   indexFile: index.html
 
-gitSync:
+# Build containers run sequentially after the repository is cloned. An empty
+# list publishes the repository contents without a build step.
+build: []
+# - name: main
+#   image:
+#     repository: node
+#     tag: 22-alpine
+#     pullPolicy: IfNotPresent
+#   workingDirectory: .
+#   command: npm ci && npm run build
+#   outputDirectory: dist
+#   path: .
+
+git:
   image:
     repository: registry.k8s.io/git-sync/git-sync
     tag: v4.7.0
     pullPolicy: IfNotPresent
-  period: 30s
   depth: 1
-  maxFailures: -1
-  root: /git
-  link: current
+  disableSubmodules: true
   resources:
     requests:
       cpu: 10m
@@ -37,6 +47,11 @@ gitSync:
       drop:
         - ALL
     readOnlyRootFilesystem: true
+
+publishImage:
+  repository: alpine
+  tag: "3.22"
+  pullPolicy: IfNotPresent
 
 gitCredentials:
   # Authentication mode: "ssh" or "githubApp".
