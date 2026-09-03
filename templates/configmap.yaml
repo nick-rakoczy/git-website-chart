@@ -28,6 +28,7 @@ data:
 
       server {
         listen {{ .Values.nginx.port }};
+        absolute_redirect off;
         root /srv/site/current;
         index {{ .Values.site.indexFile }};
 
