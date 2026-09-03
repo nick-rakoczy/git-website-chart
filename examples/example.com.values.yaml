@@ -15,7 +15,6 @@ build:
 
 gitCredentials:
   authentication: githubApp
-  secretName: example-com-git
   onePassword:
     enabled: true
     itemPath: vaults/Kubernetes/items/example-com-git

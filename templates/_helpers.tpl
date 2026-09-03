@@ -23,7 +23,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "static-site.gitSecretName" -}}
-{{- default (printf "%s-git" ((include "static-site.fullname" .) | trunc 59 | trimSuffix "-")) .Values.gitCredentials.secretName | trunc 63 | trimSuffix "-" }}
+{{- if .Values.gitCredentials.onePassword.enabled -}}
+{{- printf "%s-git" ((include "static-site.fullname" .) | trunc 59 | trimSuffix "-") -}}
+{{- else -}}
+{{- required "gitCredentials.secretName is required when OnePasswordItem provisioning is disabled" .Values.gitCredentials.secretName | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end }}
 
 {{- define "static-site.nginxConfigName" -}}

@@ -109,6 +109,18 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "onePassword": {
+                "properties": { "enabled": { "const": false } }
+              }
+            }
+          },
+          "then": {
+            "properties": { "secretName": { "minLength": 1 } }
+          }
         }
       ]
     },
