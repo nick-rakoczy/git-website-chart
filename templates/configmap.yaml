@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "static-site.fullname" . }}-nginx
+  name: {{ include "static-site.nginxConfigName" . }}
   labels:
     {{- include "static-site.labels" . | nindent 4 }}
 data:
@@ -28,7 +28,8 @@ data:
 
       server {
         listen {{ .Values.nginx.port }};
-        root /srv/site/{{ .Values.gitSync.link }};
+        absolute_redirect off;
+        root /srv/site;
         index {{ .Values.site.indexFile }};
 
         location = /healthz {
@@ -47,4 +48,3 @@ data:
         {{- end }}
       }
     }
-

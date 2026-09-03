@@ -15,16 +15,26 @@ site:
   revision: main
   indexFile: index.html
 
-gitSync:
+# Build containers run sequentially after the repository is cloned. An empty
+# list publishes the repository contents without a build step.
+build: []
+# - name: main
+#   image:
+#     repository: node
+#     tag: 22-alpine
+#     pullPolicy: IfNotPresent
+#   workingDirectory: .
+#   command: npm ci && npm run build
+#   outputDirectory: dist
+#   path: .
+
+git:
   image:
     repository: registry.k8s.io/git-sync/git-sync
     tag: v4.7.0
     pullPolicy: IfNotPresent
-  period: 30s
   depth: 1
-  maxFailures: -1
-  root: /git
-  link: current
+  disableSubmodules: true
   resources:
     requests:
       cpu: 10m
@@ -38,11 +48,16 @@ gitSync:
         - ALL
     readOnlyRootFilesystem: true
 
+publishImage:
+  repository: alpine
+  tag: "3.22"
+  pullPolicy: IfNotPresent
+
 gitCredentials:
   # Authentication mode: "ssh" or "githubApp".
   authentication: ssh
-  # Name of an existing Secret populated by the 1Password Operator.
-  # Defaults to <release fullname>-git when empty.
+  # Name of an existing Secret. Required when onePassword.enabled is false and
+  # ignored when the chart provisions its own <Helm release name>-git Secret.
   secretName: ""
   # 1Password SSH Key items expose "private key" as "private-key".
   privateKeyKey: private-key
@@ -53,7 +68,7 @@ gitCredentials:
     installationIdKey: installation_id
     privateKeyKey: private_key
   onePassword:
-    # Create a OnePasswordItem which provisions the Secret used by this chart.
+    # Create a OnePasswordItem named <Helm release name>-git.
     enabled: false
     itemPath: ""
     annotations: {}
